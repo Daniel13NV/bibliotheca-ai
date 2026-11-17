@@ -2,6 +2,9 @@
 
 **Área:** Educación · **Frontend:** React Native (Expo) · **Backend:** Microservicios Node.js + TypeScript (NestJS) con Arquitectura Hexagonal · **IA:** RAG + LLM (LangChain, Qdrant, Ollama) · **Automatización:** n8n + Telegram · **IoT:** Node-RED + MQTT
 
+**Autor:** Daniel Núñez Vázquez · **Materia:** Taller de Desarrollo 4 · **Docente:** Luis Alfaro Gutiérrez  
+Escuela de Tecnologías Digitales Aplicadas C-1, Benemérita Universidad Autónoma de Chiapas
+
 Bibliotheca AI digitaliza la operación de una biblioteca universitaria:
 
 - Cada libro físico lleva un **código QR** y una **etiqueta RFID**. El celular los lee (cámara o NFC) para hacer **autopréstamo**, devoluciones y alta de etiquetas.
@@ -93,8 +96,8 @@ Cada microservicio publica su documentación **Swagger** en `http://localhost:30
 ## 3. Puesta en marcha (backend completo)
 
 ```powershell
-# 1. Variables de entorno (ya viene un .env listo para desarrollo)
-copy .env.example .env      # solo si no existe
+# 1. Variables de entorno: copia la plantilla y escribe el token de tu bot
+copy .env.example .env
 
 # 2. Levantar todo el ecosistema
 docker compose up -d --build
@@ -111,7 +114,7 @@ docker compose logs -f ollama-init
 
 Verifica que todo esté arriba en **http://localhost:3000/health** (todos los servicios deben decir `"up"`).
 
-Al arrancar, cada servicio crea sus tablas y **datos de demostración**: 32 libros, 66 ejemplares con etiqueta RFID, 7 lectores, 4 usuarios y 2 préstamos (uno por vencer y uno vencido). El AI Service indexa el catálogo en Qdrant automáticamente cuando Ollama termina de descargar los modelos.
+Al arrancar, cada servicio crea sus tablas y **datos de demostración**: 32 libros, 66 ejemplares con etiqueta RFID, 7 lectores, 5 usuarios y 2 préstamos (uno por vencer y uno vencido). El AI Service indexa el catálogo en Qdrant automáticamente cuando Ollama termina de descargar los modelos.
 
 > 💡 **¿Tu equipo es modesto?** Instala [Ollama para Windows](https://ollama.com/download), ejecuta `ollama pull llama3.2:3b` y `ollama pull nomic-embed-text`, y en `.env` cambia `OLLAMA_BASE_URL=http://host.docker.internal:11434`. Usará tu GPU directamente.
 
@@ -188,7 +191,7 @@ Escanea el QR con **Expo Go**. El celular y la PC deben estar en la **misma red 
 ## 7. Guion de demostración (≈10 minutos)
 
 1. **Arquitectura**: muestra `docker compose ps`, http://localhost:3000/health, RabbitMQ (http://localhost:15672, usuario `bibliotheca` / `bibliotheca123`) y Qdrant (http://localhost:6333/dashboard).
-2. **Asistente IA**: entra como Daniel (`daniel.perez@bibliotheca.edu.mx`) → pestaña *Asistente* → *"Busco un libro que hable sobre física cuántica para principiantes"*. Biblio recupera por similitud libros como *Siete breves lecciones de física* o *Física cuántica para dummies* y responde con su disponibilidad y estante (solo recomienda libros que existen en el catálogo).
+2. **Asistente IA**: entra como Daniel (`daniel.perez@bibliotheca.edu.mx`) → pestaña *Biblio* → *"Busco un libro que hable sobre física cuántica para principiantes"*. Biblio recupera por similitud libros como *Siete breves lecciones de física* o *Física cuántica para dummies* y responde con su disponibilidad y estante (solo recomienda libros que existen en el catálogo).
 3. **Resumen interactivo**: abre el libro → *Generar resumen* (nivel *Para principiantes*) → hazle una pregunta de seguimiento.
 4. **Autopréstamo**: pestaña *Escanear* → QR de `BIB-00101` (o escribe el código) → *Pedir prestado*. Llega el aviso a Telegram.
 5. **Telegram**: `/misprestamos` → botón **🔄 Renovar** (renovación en un clic). Prueba `/disponible cosmos` y `/buscar novela latinoamericana`.
@@ -221,7 +224,8 @@ Los mensajes que fallan se envían a la cola `bibliotheca.dead-letters`.
 ```
 bibliotheca-ai/
 ├── docker-compose.yml          # todo el ecosistema
-├── .env / .env.example
+├── .env.example              # plantilla de variables (el .env real no se sube)
+├── iniciar.bat / detener.bat   # arranque y apagado en Windows
 ├── services/
 │   ├── _shared/                # código común (auth interna, RabbitMQ, errores) → copiado a cada servicio
 │   ├── api-gateway/
