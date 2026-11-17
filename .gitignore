@@ -1,0 +1,26 @@
+node_modules/
+dist/
+coverage/
+*.log
+.env
+!.env.example
+
+# Expo
+mobile/.expo/
+mobile/android/
+mobile/ios/
+mobile/.env
+
+# Node-RED (se generan al ejecutar)
+node-red/data/.config*.json
+node-red/data/.config*.json.backup
+node-red/data/.flows*.json.backup
+node-red/data/flows_cred.json
+node-red/data/lib/
+node-red/data/node_modules/
+node-red/data/package*.json
+node-red/data/settings.js
+
+# Diagnóstico local
+diagnostico.txt
+zz-diagnostico.bat

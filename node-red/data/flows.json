@@ -1,0 +1,726 @@
+[
+  {
+    "id": "tab_sim",
+    "type": "tab",
+    "label": "Simulador de lectores RFID",
+    "disabled": false,
+    "info": "Simula lectores físicos (arco, estantes, buzón) publicando por MQTT como lo haría el hardware real."
+  },
+  {
+    "id": "tab_ing",
+    "type": "tab",
+    "label": "Ingesta RFID → rfid-service",
+    "disabled": false,
+    "info": "Normaliza mensajes MQTT de los lectores, los agrupa por lector cada segundo y los envía al microservicio de telemetría."
+  },
+  {
+    "id": "broker1",
+    "type": "mqtt-broker",
+    "name": "Mosquitto (bibliotheca)",
+    "broker": "mosquitto",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthRetain": "false",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closeRetain": "false",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willRetain": "false",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "sim_send",
+    "type": "function",
+    "z": "tab_sim",
+    "name": "Formato de lector (MQTT)",
+    "func": "\n// Construye el mensaje tal como lo publicaría un lector RFID industrial (formato tipo Zebra FX).\nconst reads = msg.reads || [{ readerId: msg.readerId, epc: msg.epc }];\nconst out = [];\nfor (const r of reads) {\n  const burst = r.burst || 1; // los lectores reales reportan la misma etiqueta varias veces\n  for (let i = 0; i < burst; i++) {\n    out.push({\n      topic: `bibliotheca/readers/${r.readerId}/tags`,\n      payload: {\n        type: 'SIMPLE',\n        timestamp: new Date().toISOString(),\n        data: { idHex: r.epc, antenna: 1 + Math.floor(Math.random() * 2), peakRssi: -40 - Math.floor(Math.random() * 25) }\n      }\n    });\n  }\n}\nnode.status({ fill: 'blue', shape: 'dot', text: `${out.length} lecturas publicadas` });\nreturn [out];\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 620,
+    "y": 200,
+    "wires": [
+      [
+        "sim_mqtt"
+      ]
+    ]
+  },
+  {
+    "id": "sim_mqtt",
+    "type": "mqtt out",
+    "z": "tab_sim",
+    "name": "Publicar en MQTT",
+    "topic": "",
+    "qos": "0",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "broker1",
+    "x": 850,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "sim_c1",
+    "type": "comment",
+    "z": "tab_sim",
+    "name": "▶ Escenarios de demostración (haz clic en el botón de cada inject)",
+    "info": "EPC de ejemplo:\n- E00401500000012D → 'Siete breves lecciones de física' (prestado a Daniel)\n- E004015000000515 → 'Cien años de soledad' (prestado a Ana, vencido)\n- E004015000000065 → 'Breve historia del tiempo' (disponible)\n- E004015000000066 → 'Breve historia del tiempo' ejemplar 2 (disponible)",
+    "x": 280,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "sc1",
+    "type": "inject",
+    "z": "tab_sim",
+    "name": "1) Libro PRESTADO cruza el arco (OK)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 200,
+    "y": 120,
+    "wires": [
+      [
+        "sc1_f"
+      ]
+    ]
+  },
+  {
+    "id": "sc1_f",
+    "type": "function",
+    "z": "tab_sim",
+    "name": "GATE-01",
+    "func": "msg.reads = [{ readerId: 'GATE-01', epc: 'E00401500000012D', burst: 3 }];\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 120,
+    "wires": [
+      [
+        "sim_send"
+      ]
+    ]
+  },
+  {
+    "id": "sc2",
+    "type": "inject",
+    "z": "tab_sim",
+    "name": "2) Libro NO prestado cruza el arco 🚨",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 200,
+    "y": 170,
+    "wires": [
+      [
+        "sc2_f"
+      ]
+    ]
+  },
+  {
+    "id": "sc2_f",
+    "type": "function",
+    "z": "tab_sim",
+    "name": "GATE-01",
+    "func": "msg.reads = [{ readerId: 'GATE-01', epc: 'E004015000000065', burst: 5 }];\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 170,
+    "wires": [
+      [
+        "sim_send"
+      ]
+    ]
+  },
+  {
+    "id": "sc3",
+    "type": "inject",
+    "z": "tab_sim",
+    "name": "3) Daniel deja su libro en el buzón 📥",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 200,
+    "y": 220,
+    "wires": [
+      [
+        "sc3_f"
+      ]
+    ]
+  },
+  {
+    "id": "sc3_f",
+    "type": "function",
+    "z": "tab_sim",
+    "name": "RETURN-01",
+    "func": "msg.reads = [{ readerId: 'RETURN-01', epc: 'E00401500000012D', burst: 2 }];\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 220,
+    "wires": [
+      [
+        "sim_send"
+      ]
+    ]
+  },
+  {
+    "id": "sc4",
+    "type": "inject",
+    "z": "tab_sim",
+    "name": "4) Ana devuelve tarde en el buzón (multa) 📥",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 200,
+    "y": 270,
+    "wires": [
+      [
+        "sc4_f"
+      ]
+    ]
+  },
+  {
+    "id": "sc4_f",
+    "type": "function",
+    "z": "tab_sim",
+    "name": "RETURN-01",
+    "func": "msg.reads = [{ readerId: 'RETURN-01', epc: 'E004015000000515', burst: 2 }];\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 270,
+    "wires": [
+      [
+        "sim_send"
+      ]
+    ]
+  },
+  {
+    "id": "sc5",
+    "type": "inject",
+    "z": "tab_sim",
+    "name": "5) Libro de Física en estante de Literatura 📍",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 200,
+    "y": 320,
+    "wires": [
+      [
+        "sc5_f"
+      ]
+    ]
+  },
+  {
+    "id": "sc5_f",
+    "type": "function",
+    "z": "tab_sim",
+    "name": "SHELF-B",
+    "func": "msg.reads = [{ readerId: 'SHELF-B', epc: 'E004015000000066', burst: 2 }];\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 320,
+    "wires": [
+      [
+        "sim_send"
+      ]
+    ]
+  },
+  {
+    "id": "sim_c2",
+    "type": "comment",
+    "z": "tab_sim",
+    "name": "⟳ Inventario automático de estantes (cada 2 minutos)",
+    "info": "",
+    "x": 260,
+    "y": 400,
+    "wires": []
+  },
+  {
+    "id": "inv_inject",
+    "type": "inject",
+    "z": "tab_sim",
+    "name": "Escanear estantes",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "120",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 20,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 190,
+    "y": 440,
+    "wires": [
+      [
+        "inv_f"
+      ]
+    ]
+  },
+  {
+    "id": "inv_f",
+    "type": "function",
+    "z": "tab_sim",
+    "name": "Lecturas de estantes",
+    "func": "\n// Inventario automático: cada estante inteligente reporta las etiquetas que tiene encima.\n// Copias por libro y estante según los datos semilla de catalog-service.\nconst copies = [3,2,3,2,2,1,2,2,2,3,3,2,3,2,2,2,2,1,2,2,2,3,2,1,1,3,2,2,2,1,2,2];\nconst shelfOf = (i) => (i <= 12 || i === 32) ? 'SHELF-A' : (i <= 18 ? 'SHELF-B' : (i <= 25 ? 'SHELF-C' : 'SHELF-D'));\nconst onLoan = flow.get('onLoan') || ['E00401500000012D', 'E004015000000515'];\nconst epc = (i, j) => 'E0040150' + (i * 100 + j).toString(16).toUpperCase().padStart(8, '0');\nconst reads = [];\ncopies.forEach((n, idx) => {\n  const i = idx + 1;\n  for (let j = 1; j <= n; j++) {\n    const tag = epc(i, j);\n    if (onLoan.includes(tag)) continue;     // los libros prestados no están en el estante\n    if (Math.random() < 0.03) continue;     // simulamos lecturas perdidas (~3 %)\n    reads.push({ readerId: shelfOf(i), epc: tag });\n  }\n});\nmsg.reads = reads;\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 440,
+    "wires": [
+      [
+        "sim_send"
+      ]
+    ]
+  },
+  {
+    "id": "sim_c3",
+    "type": "comment",
+    "z": "tab_sim",
+    "name": "♥ Latidos de los lectores (cada 30 s)",
+    "info": "",
+    "x": 230,
+    "y": 500,
+    "wires": []
+  },
+  {
+    "id": "hb_inject",
+    "type": "inject",
+    "z": "tab_sim",
+    "name": "Latido",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "30",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 10,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 540,
+    "wires": [
+      [
+        "hb_f"
+      ]
+    ]
+  },
+  {
+    "id": "hb_f",
+    "type": "function",
+    "z": "tab_sim",
+    "name": "Latido de 7 lectores",
+    "func": "\n// Latido de cada lector físico (estado en línea / fuera de línea en la app).\nconst readers = ['GATE-01', 'DESK-01', 'RETURN-01', 'SHELF-A', 'SHELF-B', 'SHELF-C', 'SHELF-D'];\nreturn [readers.map((id) => ({ topic: `bibliotheca/readers/${id}/heartbeat`, payload: { readerId: id, ts: new Date().toISOString(), firmware: '2.4.1' } }))];\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 540,
+    "wires": [
+      [
+        "sim_mqtt"
+      ]
+    ]
+  },
+  {
+    "id": "sim_c4",
+    "type": "comment",
+    "z": "tab_sim",
+    "name": "🌐 Simulación por HTTP (útil desde Postman)",
+    "info": "",
+    "x": 240,
+    "y": 620,
+    "wires": []
+  },
+  {
+    "id": "sim_http_in",
+    "type": "http in",
+    "z": "tab_sim",
+    "name": "POST /simular",
+    "url": "/simular",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 660,
+    "wires": [
+      [
+        "sim_http_f"
+      ]
+    ]
+  },
+  {
+    "id": "sim_http_f",
+    "type": "function",
+    "z": "tab_sim",
+    "name": "Validar",
+    "func": "\n// POST http://localhost:1880/simular  { \"readerId\": \"GATE-01\", \"epc\": \"E004015000000065\", \"burst\": 3 }\nconst b = msg.payload || {};\nif (!b.readerId || !b.epc) { msg.statusCode = 400; msg.payload = { error: 'readerId y epc son obligatorios' }; return [null, msg]; }\nmsg.reads = [{ readerId: String(b.readerId).toUpperCase(), epc: String(b.epc).toUpperCase(), burst: Number(b.burst) || 1 }];\nconst ok = { payload: { ok: true, published: msg.reads }, req: msg.req, res: msg.res };\nreturn [msg, ok];\n",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 660,
+    "wires": [
+      [
+        "sim_send"
+      ],
+      [
+        "sim_http_res"
+      ]
+    ]
+  },
+  {
+    "id": "sim_http_res",
+    "type": "http response",
+    "z": "tab_sim",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 610,
+    "y": 700,
+    "wires": []
+  },
+  {
+    "id": "ing_c1",
+    "type": "comment",
+    "z": "tab_ing",
+    "name": "Lectores → MQTT → normalizar → lote por lector → rfid-service",
+    "info": "La deduplicación fina (ventana de 5 s por lector+etiqueta) la hace el dominio de rfid-service.",
+    "x": 330,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "ing_mqtt",
+    "type": "mqtt in",
+    "z": "tab_ing",
+    "name": "Lecturas de lectores",
+    "topic": "bibliotheca/readers/+/tags",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "broker1",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 170,
+    "y": 120,
+    "wires": [
+      [
+        "ing_norm"
+      ]
+    ]
+  },
+  {
+    "id": "ing_norm",
+    "type": "function",
+    "z": "tab_ing",
+    "name": "Normalizar lectura",
+    "func": "\n// bibliotheca/readers/<readerId>/tags → lectura normalizada\nconst readerId = (msg.topic || '').split('/')[2];\nconst p = msg.payload || {};\nconst data = p.data || p;\nconst epc = String(data.idHex || data.epc || '').replace(/[\\s:-]/g, '').toUpperCase();\nif (!readerId || !/^[0-9A-F]{8,32}$/.test(epc)) {\n  node.warn(`Lectura descartada (${msg.topic}): ${JSON.stringify(p)}`);\n  return null;\n}\nmsg.payload = { readerId, epc, rssi: data.peakRssi ?? data.rssi ?? null, antenna: data.antenna ?? null, timestamp: p.timestamp || new Date().toISOString() };\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 120,
+    "wires": [
+      [
+        "ing_batch"
+      ]
+    ]
+  },
+  {
+    "id": "ing_batch",
+    "type": "function",
+    "z": "tab_ing",
+    "name": "Agrupar por lector (1 s)",
+    "func": "\n// Agrupa lecturas por lector y envía un lote por segundo (reduce llamadas HTTP).\nconst buffer = context.get('buffer') || {};\nconst r = msg.payload;\n(buffer[r.readerId] = buffer[r.readerId] || []).push({ epc: r.epc, rssi: r.rssi, antenna: r.antenna, timestamp: r.timestamp });\ncontext.set('buffer', buffer);\nif (!context.get('timer')) {\n  context.set('timer', setTimeout(() => {\n    const pending = context.get('buffer') || {};\n    context.set('buffer', {});\n    context.set('timer', null);\n    for (const [readerId, reads] of Object.entries(pending)) {\n      node.send({ readerId, payload: { readerId, reads } });\n    }\n  }, 1000));\n}\nreturn null;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 600,
+    "y": 120,
+    "wires": [
+      [
+        "ing_req"
+      ]
+    ]
+  },
+  {
+    "id": "ing_req",
+    "type": "function",
+    "z": "tab_ing",
+    "name": "Preparar petición",
+    "func": "\nmsg.method = 'POST';\nmsg.url = (env.get('RFID_SERVICE_URL') || 'http://rfid-service:3004') + '/internal/rfid/ingest';\nmsg.headers = { 'content-type': 'application/json', 'x-internal-key': env.get('INTERNAL_API_KEY') };\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 820,
+    "y": 120,
+    "wires": [
+      [
+        "ing_http"
+      ]
+    ]
+  },
+  {
+    "id": "ing_http",
+    "type": "http request",
+    "z": "tab_ing",
+    "name": "POST /internal/rfid/ingest",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 1040,
+    "y": 120,
+    "wires": [
+      [
+        "ing_res"
+      ]
+    ]
+  },
+  {
+    "id": "ing_res",
+    "type": "function",
+    "z": "tab_ing",
+    "name": "Resultado",
+    "func": "\nconst ok = msg.statusCode === 200;\nconst p = msg.payload || {};\nnode.status(ok\n  ? { fill: 'green', shape: 'dot', text: `${p.readerId}: ${p.accepted} nuevas · ${p.duplicates} duplicadas` }\n  : { fill: 'red', shape: 'ring', text: `HTTP ${msg.statusCode}: ${p.message || 'error'}` });\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1250,
+    "y": 120,
+    "wires": [
+      [
+        "ing_dbg"
+      ]
+    ]
+  },
+  {
+    "id": "ing_dbg",
+    "type": "debug",
+    "z": "tab_ing",
+    "name": "Respuesta rfid-service",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1450,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "hb_mqtt",
+    "type": "mqtt in",
+    "z": "tab_ing",
+    "name": "Latidos de lectores",
+    "topic": "bibliotheca/readers/+/heartbeat",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "broker1",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 170,
+    "y": 220,
+    "wires": [
+      [
+        "hb_req"
+      ]
+    ]
+  },
+  {
+    "id": "hb_req",
+    "type": "function",
+    "z": "tab_ing",
+    "name": "Preparar latido",
+    "func": "\nconst readerId = (msg.topic || '').split('/')[2];\nmsg.method = 'POST';\nmsg.url = (env.get('RFID_SERVICE_URL') || 'http://rfid-service:3004') + `/internal/rfid/readers/${encodeURIComponent(readerId)}/heartbeat`;\nmsg.headers = { 'x-internal-key': env.get('INTERNAL_API_KEY') };\nmsg.payload = '';\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 220,
+    "wires": [
+      [
+        "hb_http"
+      ]
+    ]
+  },
+  {
+    "id": "hb_http",
+    "type": "http request",
+    "z": "tab_ing",
+    "name": "POST heartbeat",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 600,
+    "y": 220,
+    "wires": [
+      [
+        "hb_res"
+      ]
+    ]
+  },
+  {
+    "id": "hb_res",
+    "type": "function",
+    "z": "tab_ing",
+    "name": "Estado",
+    "func": "\nnode.status(msg.statusCode === 200 ? { fill: 'green', shape: 'dot', text: `♥ ${new Date().toLocaleTimeString()}` } : { fill: 'red', shape: 'ring', text: `HTTP ${msg.statusCode}` });\nreturn null;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 800,
+    "y": 220,
+    "wires": [
+      []
+    ]
+  }
+]

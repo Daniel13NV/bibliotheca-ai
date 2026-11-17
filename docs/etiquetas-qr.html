@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Etiquetas QR · Bibliotheca AI</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root { --ink: #1F2A44; --gold: #C8963E; --paper: #F7F4EE; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--paper); color: var(--ink); margin: 0; padding: 24px; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+  h1 { margin: 0; font-size: 22px; }
+  p { margin: 4px 0 0; color: #555; font-size: 14px; }
+  button { background: var(--ink); color: #fff; border: 0; border-radius: 10px; padding: 10px 18px; font-size: 15px; cursor: pointer; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+  .label { background: #fff; border: 1px dashed #bbb; border-radius: 10px; padding: 12px; text-align: center; break-inside: avoid; }
+  .qr { display: flex; justify-content: center; margin-bottom: 8px; }
+  .code { font-weight: 800; letter-spacing: 1px; font-size: 15px; }
+  .title { font-size: 11px; color: #444; margin-top: 4px; height: 28px; overflow: hidden; }
+  .epc { font-family: ui-monospace, monospace; font-size: 10px; color: #8A6420; margin-top: 4px; }
+  .loan { color: #C0392B; font-size: 10px; font-weight: 700; }
+  @media print { body { background: #fff; padding: 0; } header button { display: none; } .label { border-color: #999; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>📚 Etiquetas QR de los ejemplares de demostración</h1>
+    <p>Recórtalas y pégalas en los libros (o escanéalas desde la pantalla) con la pestaña <b>Escanear</b> de la app.</p>
+  </div>
+  <button onclick="window.print()">Imprimir</button>
+</header>
+<div class="grid" id="grid"></div>
+<script>
+const BOOKS = [{"t": "Breve historia del tiempo", "n": 3, "c": "Física"}, {"t": "El universo elegante", "n": 2, "c": "Física"}, {"t": "Siete breves lecciones de física", "n": 3, "c": "Física"}, {"t": "Física cuántica para dummies", "n": 2, "c": "Física"}, {"t": "Introducción a la mecánica cuántica", "n": 2, "c": "Física"}, {"t": "La realidad no es lo que parece", "n": 1, "c": "Física"}, {"t": "Cosmos", "n": 2, "c": "Astronomía"}, {"t": "El gen egoísta", "n": 2, "c": "Biología"}, {"t": "El origen de las especies", "n": 2, "c": "Biología"}, {"t": "Química", "n": 3, "c": "Química"}, {"t": "Cálculo de una variable", "n": 3, "c": "Matemáticas"}, {"t": "El hombre que calculaba", "n": 2, "c": "Matemáticas"}, {"t": "Cien años de soledad", "n": 3, "c": "Literatura"}, {"t": "Pedro Páramo", "n": 2, "c": "Literatura"}, {"t": "El laberinto de la soledad", "n": 2, "c": "Ensayo"}, {"t": "Don Quijote de la Mancha", "n": 2, "c": "Literatura"}, {"t": "1984", "n": 2, "c": "Literatura"}, {"t": "Rayuela", "n": 1, "c": "Literatura"}, {"t": "Código limpio", "n": 2, "c": "Programación"}, {"t": "Arquitectura limpia", "n": 2, "c": "Programación"}, {"t": "Introducción a los algoritmos", "n": 2, "c": "Programación"}, {"t": "Curso intensivo de Python", "n": 3, "c": "Programación"}, {"t": "Inteligencia artificial: un enfoque moderno", "n": 2, "c": "Inteligencia Artificial"}, {"t": "Deep Learning", "n": 1, "c": "Inteligencia Artificial"}, {"t": "Domain-Driven Design", "n": 1, "c": "Programación"}, {"t": "Sapiens: De animales a dioses", "n": 3, "c": "Historia"}, {"t": "El mundo de Sofía", "n": 2, "c": "Filosofía"}, {"t": "Pensar rápido, pensar despacio", "n": 2, "c": "Psicología"}, {"t": "El hombre en busca de sentido", "n": 2, "c": "Psicología"}, {"t": "La riqueza de las naciones", "n": 1, "c": "Economía"}, {"t": "Visión de los vencidos", "n": 2, "c": "Historia"}, {"t": "Álgebra lineal y sus aplicaciones", "n": 2, "c": "Matemáticas"}];
+const ON_LOAN = ['BIB-00301', 'BIB-01301'];
+const grid = document.getElementById('grid');
+BOOKS.forEach((b, idx) => {
+  const i = idx + 1;
+  for (let j = 1; j <= b.n; j++) {
+    const n = i * 100 + j;
+    const code = 'BIB-' + String(n).padStart(5, '0');
+    const epc = 'E0040150' + n.toString(16).toUpperCase().padStart(8, '0');
+    const el = document.createElement('div');
+    el.className = 'label';
+    el.innerHTML = '<div class="qr"></div><div class="code"></div><div class="title"></div><div class="epc"></div>';
+    el.querySelector('.code').textContent = code;
+    el.querySelector('.title').textContent = b.t + ' · ' + b.c;
+    el.querySelector('.epc').textContent = 'RFID ' + epc;
+    if (ON_LOAN.includes(code)) el.querySelector('.epc').insertAdjacentHTML('afterend', '<div class="loan">prestado en la demo</div>');
+    grid.appendChild(el);
+    new QRCode(el.querySelector('.qr'), { text: code, width: 120, height: 120, correctLevel: QRCode.CorrectLevel.M });
+  }
+});
+</script>
+</body>
+</html>

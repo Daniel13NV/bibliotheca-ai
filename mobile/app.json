@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "Bibliotheca AI",
+    "slug": "bibliotheca-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "bibliotheca",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "edu.bibliotheca.ai",
+      "infoPlist": {
+        "NSCameraUsageDescription": "La cámara se usa para escanear el código QR de los libros.",
+        "NFCReaderUsageDescription": "NFC se usa para leer la etiqueta RFID de los libros."
+      }
+    },
+    "android": {
+      "package": "edu.bibliotheca.ai",
+      "adaptiveIcon": {
+        "backgroundColor": "#1F2A44"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.NFC"
+      ]
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "La cámara se usa para escanear el código QR de los libros.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "react-native-nfc-manager",
+        {
+          "nfcPermission": "NFC se usa para leer la etiqueta RFID de los libros.",
+          "includeNdefEntitlement": false
+        }
+      ],
+      "expo-secure-store",
+      "expo-status-bar",
+      "expo-font"
+    ]
+  }
+}

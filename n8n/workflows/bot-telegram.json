@@ -1,0 +1,949 @@
+{
+  "id": "BiblioTgBot00001",
+  "name": "Bibliotheca · Bot de Telegram",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 3
+            }
+          ]
+        }
+      },
+      "id": "acdfc0f3-b624-43ae-a543-a4d2cc80c93e",
+      "name": "Cada 3 segundos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Long polling de Telegram: no requiere URL pública (ideal para desarrollo local).\nconst data = $getWorkflowStaticData('global');\nreturn [{ json: { offset: data.offset || 0 } }];"
+      },
+      "id": "87a183bd-e37c-415b-974b-7e055ac978db",
+      "name": "Offset actual",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/getUpdates?timeout=0&offset={{ $json.offset }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "id": "dc771dae-a1d4-46b8-b3ca-c4a28972ed59",
+      "name": "Leer mensajes (getUpdates)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $getWorkflowStaticData('global');\nconst res = $('Leer mensajes (getUpdates)').first().json;\nif (!res.ok || !Array.isArray(res.result) || res.result.length === 0) return [];\ndata.offset = res.result[res.result.length - 1].update_id + 1;\n\nconst items = [];\nfor (const u of res.result) {\n  if (u.message && typeof u.message.text === 'string') {\n    const text = u.message.text.trim();\n    const [first, ...rest] = text.split(/\\s+/);\n    const isCommand = first.startsWith('/');\n    items.push({ json: {\n      kind: 'message', chatId: String(u.message.chat.id), username: u.message.from?.username ?? null,\n      firstName: u.message.from?.first_name ?? '', command: isCommand ? first.split('@')[0].toLowerCase() : null,\n      args: isCommand ? rest.join(' ').trim() : text, callbackId: null,\n    } });\n  } else if (u.callback_query) {\n    const cq = u.callback_query;\n    const [action, value = ''] = String(cq.data || '').split(':');\n    items.push({ json: {\n      kind: 'callback', chatId: String(cq.message?.chat?.id ?? cq.from.id), username: cq.from?.username ?? null,\n      firstName: cq.from?.first_name ?? '', command: action === 'renew' ? '/renovar' : action === 'cmd' ? '/' + value : null,\n      args: action === 'renew' ? value : '', callbackId: cq.id,\n    } });\n  }\n}\nreturn items;"
+      },
+      "id": "9fb31779-d3cc-4c2b-8d36-7a892159e3db",
+      "name": "Separar actualizaciones",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Telegram necesita que confirmemos cada pulsación de botón inline.\nreturn $input.all().filter((i) => i.json.callbackId);"
+      },
+      "id": "e758b4ab-8d28-4244-897e-f9abc2eba1b6",
+      "name": "Solo botones",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/answerCallbackQuery",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ callback_query_id: $json.callbackId, text: '⏳ Procesando…' }) }}"
+      },
+      "id": "878872cf-6f84-476b-b8af-74a51ad935b7",
+      "name": "Confirmar botón",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.USERS_URL }}/internal/users/by-telegram/{{ $json.chatId }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-internal-key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
+            }
+          ]
+        }
+      },
+      "id": "9330bd5f-5dea-4f3c-a54f-c43c5691cc4f",
+      "name": "¿Quién escribe?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const u = $('Separar actualizaciones').item.json;\nconst who = $json || {};\nconst user = who.linked ? who.user : null;\nconst cmd = u.command;\nlet route = 'ayuda';\nif (cmd === '/start' && u.args) route = 'vincular';\nelse if (['/start', '/ayuda', '/help'].includes(cmd)) route = 'ayuda';\nelse if (cmd === '/buscar') route = u.args ? 'buscar' : 'ayuda';\nelse if (cmd === '/disponible') route = u.args ? 'disponible' : 'ayuda';\nelse if (cmd === '/pregunta') route = u.args ? 'pregunta' : 'ayuda';\nelse if (['/misprestamos', '/prestamos'].includes(cmd)) route = user ? 'prestamos' : 'sin_vincular';\nelse if (cmd === '/renovar') route = user ? (u.args ? 'renovar' : 'prestamos') : 'sin_vincular';\nelse if (cmd === '/multas') route = user ? 'multas' : 'sin_vincular';\nelse if (!cmd) route = u.args.length >= 3 ? 'pregunta' : 'ayuda'; // texto libre → asistente IA\nconst ROUTES = ['vincular', 'buscar', 'disponible', 'pregunta', 'prestamos', 'renovar', 'multas', 'ayuda', 'sin_vincular'];\nreturn { json: { ...u, user, route, routeIndex: ROUTES.indexOf(route) } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "813f9f21-a314-4125-a18c-6063ec579c6b",
+      "name": "Enrutar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 9,
+        "output": "={{ $json.routeIndex }}"
+      },
+      "id": "69178025-3dd7-4446-85e8-a02a603d6f41",
+      "name": "¿Qué pidió?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.USERS_URL }}/internal/users/telegram/link",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-internal-key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ code: $json.args, chatId: $json.chatId, username: $json.username }) }}"
+      },
+      "id": "308bd6d7-37a0-4daf-9ea0-4ae6118d63a1",
+      "name": "Vincular cuenta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst md = (s) => esc(s).replace(/\\*\\*(.+?)\\*\\*/g, '<b>$1</b>').replace(/^#{1,3}\\s*(.+)$/gm, '<b>$1</b>').replace(/^\\s*[-*]\\s+/gm, '• ');\nconst cut = (s) => (s.length > 3900 ? s.slice(0, 3900) + '…' : s);\nconst avail = (a) => !a ? '' : (a.available > 0 ? `🟢 ${a.available}/${a.total} disponibles` : `🔴 Sin ejemplares (${a.onLoan} prestados)`);\nconst fmtDate = (iso) => new Date(iso).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/Mexico_City' });\nconst failed = (r) => r && (r.statusCode >= 400 || r.error) ? (Array.isArray(r.message) ? r.message.join('. ') : (r.message || r.error || 'Error')) : null;\n\nconst req = $('Enrutar').item.json;\nconst r = $json;\nconst err = failed(r);\nreturn { json: { chatId: req.chatId, text: err\n  ? `❌ No pude vincular tu cuenta: ${esc(err)}\\nGenera un código nuevo en la app (Perfil → Vincular Telegram).`\n  : `✅ ¡Listo, <b>${esc(r.name)}</b>! Tu cuenta quedó vinculada.\\nTe avisaré antes de que venzan tus préstamos. Escribe /ayuda para ver lo que puedo hacer.` } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "0b400359-e8f5-4bce-8c87-9893c8a85fa9",
+      "name": "Mensaje vinculación",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AI_URL }}/internal/ai/search",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-internal-key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: $json.args, limit: 5 }) }}"
+      },
+      "id": "e4a44854-9dfc-42ea-9c29-cd6f56d0a8ef",
+      "name": "Búsqueda semántica",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst md = (s) => esc(s).replace(/\\*\\*(.+?)\\*\\*/g, '<b>$1</b>').replace(/^#{1,3}\\s*(.+)$/gm, '<b>$1</b>').replace(/^\\s*[-*]\\s+/gm, '• ');\nconst cut = (s) => (s.length > 3900 ? s.slice(0, 3900) + '…' : s);\nconst avail = (a) => !a ? '' : (a.available > 0 ? `🟢 ${a.available}/${a.total} disponibles` : `🔴 Sin ejemplares (${a.onLoan} prestados)`);\nconst fmtDate = (iso) => new Date(iso).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/Mexico_City' });\nconst failed = (r) => r && (r.statusCode >= 400 || r.error) ? (Array.isArray(r.message) ? r.message.join('. ') : (r.message || r.error || 'Error')) : null;\n\nconst req = $('Enrutar').item.json;\nconst r = $json;\nconst err = failed(r);\nlet text;\nif (err) text = `⚠️ El buscador no está disponible: ${esc(err)}`;\nelse if (!r.results?.length) text = `🔎 No encontré libros relacionados con “${esc(req.args)}”. Prueba con otras palabras.`;\nelse text = `🔎 <b>Resultados para:</b> ${esc(req.args)}\\n\\n` + r.results.map((b, i) =>\n  `${i + 1}. <b>${esc(b.title)}</b>\\n    ${esc(b.authors.join(', '))} · ${esc(b.category)}\\n    ${avail(b.availability)}${b.availability?.locations?.length ? ' · 📍 ' + esc(b.availability.locations[0]) : ''}`\n).join('\\n\\n');\nreturn { json: { chatId: req.chatId, text: cut(text) } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "2ddacdb2-96a6-4026-b002-54e1b515bd56",
+      "name": "Mensaje búsqueda",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CATALOG_URL }}/internal/books/search?pageSize=5&search={{ encodeURIComponent($json.args) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-internal-key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
+            }
+          ]
+        }
+      },
+      "id": "b70eb407-e074-4497-a8a1-75f1d3523a91",
+      "name": "Consultar disponibilidad",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst md = (s) => esc(s).replace(/\\*\\*(.+?)\\*\\*/g, '<b>$1</b>').replace(/^#{1,3}\\s*(.+)$/gm, '<b>$1</b>').replace(/^\\s*[-*]\\s+/gm, '• ');\nconst cut = (s) => (s.length > 3900 ? s.slice(0, 3900) + '…' : s);\nconst avail = (a) => !a ? '' : (a.available > 0 ? `🟢 ${a.available}/${a.total} disponibles` : `🔴 Sin ejemplares (${a.onLoan} prestados)`);\nconst fmtDate = (iso) => new Date(iso).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/Mexico_City' });\nconst failed = (r) => r && (r.statusCode >= 400 || r.error) ? (Array.isArray(r.message) ? r.message.join('. ') : (r.message || r.error || 'Error')) : null;\n\nconst req = $('Enrutar').item.json;\nconst r = $json;\nconst err = failed(r);\nlet text;\nif (err) text = `⚠️ No pude consultar el catálogo: ${esc(err)}`;\nelse if (!r.items?.length) text = `📚 No hay libros que coincidan con “${esc(req.args)}”.\\nTip: usa /buscar para una búsqueda por tema con IA.`;\nelse text = `📚 <b>Disponibilidad</b> para “${esc(req.args)}”\\n\\n` + r.items.map((b) =>\n  `• <b>${esc(b.title)}</b> — ${esc(b.authors.join(', '))}\\n   ${avail(b.availability)}`).join('\\n');\nreturn { json: { chatId: req.chatId, text: cut(text) } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "29762568-f264-458b-8bfa-a186967b35f9",
+      "name": "Mensaje disponibilidad",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AI_URL }}/internal/ai/chat",
+        "options": {
+          "timeout": 180000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-internal-key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ question: $json.args }) }}"
+      },
+      "id": "1a739271-d12f-4df5-b1b6-3fd4d7b7acd0",
+      "name": "Asistente IA (RAG)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst md = (s) => esc(s).replace(/\\*\\*(.+?)\\*\\*/g, '<b>$1</b>').replace(/^#{1,3}\\s*(.+)$/gm, '<b>$1</b>').replace(/^\\s*[-*]\\s+/gm, '• ');\nconst cut = (s) => (s.length > 3900 ? s.slice(0, 3900) + '…' : s);\nconst avail = (a) => !a ? '' : (a.available > 0 ? `🟢 ${a.available}/${a.total} disponibles` : `🔴 Sin ejemplares (${a.onLoan} prestados)`);\nconst fmtDate = (iso) => new Date(iso).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/Mexico_City' });\nconst failed = (r) => r && (r.statusCode >= 400 || r.error) ? (Array.isArray(r.message) ? r.message.join('. ') : (r.message || r.error || 'Error')) : null;\n\nconst req = $('Enrutar').item.json;\nconst r = $json;\nconst err = failed(r);\nconst text = err ? `⚠️ El asistente no está disponible: ${esc(err)}` : `🤖 ${md(r.answer)}`;\nreturn { json: { chatId: req.chatId, text: cut(text) } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "683e2d8e-b7f8-4e45-9888-436ed26fba5c",
+      "name": "Mensaje asistente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.LOANS_URL }}/internal/users/{{ $json.user.id }}/loans",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-internal-key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
+            }
+          ]
+        }
+      },
+      "id": "97e0d1fc-bff2-4d46-aac1-e03e15991bd1",
+      "name": "Mis préstamos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst md = (s) => esc(s).replace(/\\*\\*(.+?)\\*\\*/g, '<b>$1</b>').replace(/^#{1,3}\\s*(.+)$/gm, '<b>$1</b>').replace(/^\\s*[-*]\\s+/gm, '• ');\nconst cut = (s) => (s.length > 3900 ? s.slice(0, 3900) + '…' : s);\nconst avail = (a) => !a ? '' : (a.available > 0 ? `🟢 ${a.available}/${a.total} disponibles` : `🔴 Sin ejemplares (${a.onLoan} prestados)`);\nconst fmtDate = (iso) => new Date(iso).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/Mexico_City' });\nconst failed = (r) => r && (r.statusCode >= 400 || r.error) ? (Array.isArray(r.message) ? r.message.join('. ') : (r.message || r.error || 'Error')) : null;\n\nconst req = $('Enrutar').item.json;\nconst r = $json;\nconst err = failed(r);\nif (err) return { json: { chatId: req.chatId, text: `⚠️ ${esc(err)}` } };\nconst loans = r.loans || [];\nif (!loans.length) return { json: { chatId: req.chatId, text: '📭 No tienes préstamos activos. ¡Busca tu próxima lectura con /buscar!' } };\nconst icon = { ACTIVE: '🟢', DUE_SOON: '🟡', OVERDUE: '🔴' };\nconst lines = loans.map((l) => {\n  const when = l.status === 'OVERDUE' ? `vencido · multa acumulada $${l.accruedFine}` : l.daysUntilDue === 0 ? 'vence hoy' : `vence ${fmtDate(l.dueDate)}`;\n  return `${icon[l.status] || '•'} <b>${esc(l.bookTitle)}</b>\\n    ${when} · renovaciones disponibles: ${l.renewalsLeft}`;\n});\nconst buttons = loans.filter((l) => l.status !== 'OVERDUE' && l.renewalsLeft > 0)\n  .map((l) => [{ text: `🔄 Renovar «${l.bookTitle.slice(0, 28)}»`, callback_data: `renew:${l.id}` }]);\nconst s = r.summary || {};\nconst footer = s.pendingPenalties > 0 ? `\\n\\n💸 Multas pendientes: $${s.pendingPenalties} ${s.currency || 'MXN'}` : '';\nreturn { json: { chatId: req.chatId, text: `📚 <b>Tus préstamos</b>\\n\\n${lines.join('\\n\\n')}${footer}`,\n  replyMarkup: buttons.length ? { inline_keyboard: buttons } : undefined } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "7607d976-2ff0-4984-b6dd-5b6effd9f1ab",
+      "name": "Mensaje préstamos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LOANS_URL }}/internal/loans/{{ $json.args }}/renew",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-internal-key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ userId: $json.user.id }) }}"
+      },
+      "id": "7f524354-8fb9-4112-a927-6617e48ef82c",
+      "name": "Renovar préstamo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst md = (s) => esc(s).replace(/\\*\\*(.+?)\\*\\*/g, '<b>$1</b>').replace(/^#{1,3}\\s*(.+)$/gm, '<b>$1</b>').replace(/^\\s*[-*]\\s+/gm, '• ');\nconst cut = (s) => (s.length > 3900 ? s.slice(0, 3900) + '…' : s);\nconst avail = (a) => !a ? '' : (a.available > 0 ? `🟢 ${a.available}/${a.total} disponibles` : `🔴 Sin ejemplares (${a.onLoan} prestados)`);\nconst fmtDate = (iso) => new Date(iso).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/Mexico_City' });\nconst failed = (r) => r && (r.statusCode >= 400 || r.error) ? (Array.isArray(r.message) ? r.message.join('. ') : (r.message || r.error || 'Error')) : null;\n\nconst req = $('Enrutar').item.json;\nconst r = $json;\nconst err = failed(r);\nconst text = err ? `❌ No se pudo renovar: ${esc(err)}`\n  : `✅ <b>${esc(r.bookTitle)}</b> renovado.\\nNueva fecha límite: <b>${fmtDate(r.dueDate)}</b> · renovaciones restantes: ${r.renewalsLeft}`;\nreturn { json: { chatId: req.chatId, text } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "59c95dc6-fe3d-4a5a-acc9-d9bc6bad3010",
+      "name": "Mensaje renovación",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.LOANS_URL }}/internal/users/{{ $json.user.id }}/penalties",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-internal-key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
+            }
+          ]
+        }
+      },
+      "id": "ba008588-b0a6-47c5-a326-aeccfb737747",
+      "name": "Mis multas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst md = (s) => esc(s).replace(/\\*\\*(.+?)\\*\\*/g, '<b>$1</b>').replace(/^#{1,3}\\s*(.+)$/gm, '<b>$1</b>').replace(/^\\s*[-*]\\s+/gm, '• ');\nconst cut = (s) => (s.length > 3900 ? s.slice(0, 3900) + '…' : s);\nconst avail = (a) => !a ? '' : (a.available > 0 ? `🟢 ${a.available}/${a.total} disponibles` : `🔴 Sin ejemplares (${a.onLoan} prestados)`);\nconst fmtDate = (iso) => new Date(iso).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/Mexico_City' });\nconst failed = (r) => r && (r.statusCode >= 400 || r.error) ? (Array.isArray(r.message) ? r.message.join('. ') : (r.message || r.error || 'Error')) : null;\n\nconst req = $('Enrutar').item.json;\nconst r = $json;\nconst err = failed(r);\nif (err) return { json: { chatId: req.chatId, text: `⚠️ ${esc(err)}` } };\nconst pending = (r.penalties || []).filter((p) => p.status === 'PENDING');\nconst text = pending.length\n  ? `💸 <b>Multas pendientes: $${r.pendingTotal} ${r.currency}</b>\\n\\n` + pending.map((p) => `• ${esc(p.bookTitle)} — ${p.daysLate} día(s) de atraso: $${p.amount}`).join('\\n') + '\\n\\nPágalas en el mostrador de la biblioteca.'\n  : '🎉 No tienes multas pendientes.';\nreturn { json: { chatId: req.chatId, text } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "03a794de-8996-4d4b-9c57-0223e4f2c8e8",
+      "name": "Mensaje multas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $json;\nconst hi = req.firstName ? `¡Hola, ${req.firstName}! ` : '¡Hola! ';\nconst text = `📖 ${hi}Soy el bot de <b>Bibliotheca AI</b>.\\n\\n` +\n  `/buscar <i>tema</i> — búsqueda inteligente (ej. /buscar física cuántica para principiantes)\\n` +\n  `/disponible <i>título o autor</i> — ¿hay ejemplares en el estante?\\n` +\n  `/pregunta <i>texto</i> — pregúntale al asistente (también puedes escribir sin comando)\\n` +\n  `/misprestamos — tus préstamos con botón de renovación\\n` +\n  `/renovar — renueva en un clic\\n` +\n  `/multas — consulta tus multas\\n\\n` +\n  (req.user ? `Cuenta vinculada: <b>${req.user.name}</b> ✅` : `Para ver tus préstamos vincula tu cuenta: en la app ve a <b>Perfil → Vincular Telegram</b> y envía aquí <code>/start CÓDIGO</code>.`);\nreturn { json: { chatId: req.chatId, text } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "8b6e3e9c-c432-4171-8e7d-c194024cd4a6",
+      "name": "Mensaje ayuda",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return { json: { chatId: $json.chatId, text: '🔗 Primero vincula tu cuenta: abre la app Bibliotheca AI → <b>Perfil → Vincular Telegram</b> y envía aquí <code>/start CÓDIGO</code>.' } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "06315c7d-c9bb-46ea-8a7f-94180df11b55",
+      "name": "Mensaje sin vincular",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        1020
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chatId, text: $json.text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: $json.replyMarkup }) }}"
+      },
+      "id": "998f6fc4-cb2a-4b43-95e1-f818f4af26cf",
+      "name": "Enviar a Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2280,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🤖 Bot de Telegram\nLee mensajes con *long polling* (no necesita URL pública).\n\n1. Pon tu token en `.env` → `TELEGRAM_BOT_TOKEN`\n2. Activa este flujo (interruptor *Active/Publish*)\n\nComandos: /buscar, /disponible, /pregunta, /misprestamos, /renovar, /multas, /ayuda",
+        "height": 260,
+        "width": 420
+      },
+      "id": "473d8b63-bfe4-4316-9b62-56bd579b0b76",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/getUpdates?timeout=0&limit=1&offset={{ ($json.result && $json.result.length) ? $json.result[$json.result.length - 1].update_id + 1 : $('Offset actual').first().json.offset }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "c917759e-4dbe-4cf7-bd3a-62ef3a440b61",
+      "name": "Confirmar recibidos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        300
+      ],
+      "notes": "Marca los mensajes como leídos en Telegram en cuanto llegan. Así, si una consulta tarda (por ejemplo la IA), la siguiente revisión no vuelve a procesar el mismo mensaje.",
+      "notesInFlow": true
+    }
+  ],
+  "connections": {
+    "Cada 3 segundos": {
+      "main": [
+        [
+          {
+            "node": "Offset actual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Offset actual": {
+      "main": [
+        [
+          {
+            "node": "Leer mensajes (getUpdates)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer mensajes (getUpdates)": {
+      "main": [
+        [
+          {
+            "node": "Confirmar recibidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar actualizaciones": {
+      "main": [
+        [
+          {
+            "node": "Solo botones",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "¿Quién escribe?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solo botones": {
+      "main": [
+        [
+          {
+            "node": "Confirmar botón",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Quién escribe?": {
+      "main": [
+        [
+          {
+            "node": "Enrutar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrutar": {
+      "main": [
+        [
+          {
+            "node": "¿Qué pidió?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Qué pidió?": {
+      "main": [
+        [
+          {
+            "node": "Vincular cuenta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Búsqueda semántica",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Consultar disponibilidad",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Asistente IA (RAG)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mis préstamos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Renovar préstamo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mis multas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mensaje ayuda",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mensaje sin vincular",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vincular cuenta": {
+      "main": [
+        [
+          {
+            "node": "Mensaje vinculación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensaje vinculación": {
+      "main": [
+        [
+          {
+            "node": "Enviar a Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Búsqueda semántica": {
+      "main": [
+        [
+          {
+            "node": "Mensaje búsqueda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensaje búsqueda": {
+      "main": [
+        [
+          {
+            "node": "Enviar a Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar disponibilidad": {
+      "main": [
+        [
+          {
+            "node": "Mensaje disponibilidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensaje disponibilidad": {
+      "main": [
+        [
+          {
+            "node": "Enviar a Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Asistente IA (RAG)": {
+      "main": [
+        [
+          {
+            "node": "Mensaje asistente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensaje asistente": {
+      "main": [
+        [
+          {
+            "node": "Enviar a Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mis préstamos": {
+      "main": [
+        [
+          {
+            "node": "Mensaje préstamos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensaje préstamos": {
+      "main": [
+        [
+          {
+            "node": "Enviar a Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Renovar préstamo": {
+      "main": [
+        [
+          {
+            "node": "Mensaje renovación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensaje renovación": {
+      "main": [
+        [
+          {
+            "node": "Enviar a Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mis multas": {
+      "main": [
+        [
+          {
+            "node": "Mensaje multas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensaje multas": {
+      "main": [
+        [
+          {
+            "node": "Enviar a Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensaje ayuda": {
+      "main": [
+        [
+          {
+            "node": "Enviar a Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensaje sin vincular": {
+      "main": [
+        [
+          {
+            "node": "Enviar a Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmar recibidos": {
+      "main": [
+        [
+          {
+            "node": "Separar actualizaciones",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": true,
+    "timezone": "America/Mexico_City"
+  },
+  "pinData": {},
+  "tags": []
+}

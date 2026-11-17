@@ -1,0 +1,353 @@
+name: bibliotheca-ai
+
+# =====================================================================
+#  Bibliotheca AI — Ecosistema Digital de Bibliotecas
+#  Levantar todo:   docker compose up -d --build
+#  Ver estado:      docker compose ps
+# =====================================================================
+
+x-mysql: &mysql
+  image: mysql:8.4
+  restart: unless-stopped
+  command:
+    - --innodb-buffer-pool-size=64M
+    - --performance-schema=OFF
+    - --character-set-server=utf8mb4
+    - --collation-server=utf8mb4_unicode_ci
+  healthcheck:
+    test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+    interval: 10s
+    timeout: 5s
+    retries: 30
+    start_period: 30s
+
+x-node-service: &node-service
+  restart: unless-stopped
+  depends_on: &node-deps
+    # Los servicios se reconectan solos a RabbitMQ, no necesitan esperar a que esté "healthy".
+    rabbitmq:
+      condition: service_started
+
+x-common-env: &common-env
+  NODE_ENV: production
+  TZ: ${TZ:-America/Mexico_City}
+  INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+  RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+  DB_PORT: "3306"
+  DB_PASSWORD: ${DB_PASSWORD}
+  DB_SYNC: "true"
+
+services:
+  # ------------------------------------------------------------------
+  #  Bases de datos (una por microservicio, como en el diagrama)
+  # ------------------------------------------------------------------
+  mysql-users:
+    <<: *mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: users_db
+      MYSQL_USER: bibliotheca
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes: [mysql-users:/var/lib/mysql]
+
+  mysql-catalog:
+    <<: *mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: catalog_db
+      MYSQL_USER: bibliotheca
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes: [mysql-catalog:/var/lib/mysql]
+
+  mysql-loans:
+    <<: *mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: loans_db
+      MYSQL_USER: bibliotheca
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes: [mysql-loans:/var/lib/mysql]
+
+  mysql-rfid:
+    <<: *mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: rfid_db
+      MYSQL_USER: bibliotheca
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes: [mysql-rfid:/var/lib/mysql]
+
+  mysql-notifications:
+    <<: *mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: notifications_db
+      MYSQL_USER: bibliotheca
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes: [mysql-notifications:/var/lib/mysql]
+
+  # ------------------------------------------------------------------
+  #  Mensajería, vectores, LLM e IoT
+  # ------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:4-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "5672:5672"
+      - "15672:15672"   # Consola: http://localhost:15672
+    volumes: [rabbitmq:/var/lib/rabbitmq]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 20s
+      timeout: 30s
+      retries: 15
+      start_period: 90s
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - "6333:6333"     # Dashboard: http://localhost:6333/dashboard
+    volumes: [qdrant:/qdrant/storage]
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    environment:
+      # Mantiene los modelos cargados en memoria 1 h (evita recargarlos en cada pregunta).
+      OLLAMA_KEEP_ALIVE: 1h
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "2"
+    volumes: [ollama:/root/.ollama]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    # Si tienes GPU NVIDIA con WSL2, descomenta para acelerar:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+  ollama-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      CHAT_MODEL: ${OLLAMA_CHAT_MODEL}
+      EMBED_MODEL: ${OLLAMA_EMBED_MODEL}
+    entrypoint: ["/bin/sh", "-c", "ollama pull $$EMBED_MODEL && ollama pull $$CHAT_MODEL && echo 'Modelos listos'"]
+    restart: "no"
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  node-red:
+    image: nodered/node-red:latest
+    restart: unless-stopped
+    depends_on: [mosquitto]
+    ports:
+      - "1880:1880"     # Editor: http://localhost:1880
+    environment:
+      TZ: ${TZ:-America/Mexico_City}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      RFID_SERVICE_URL: http://rfid-service:3004
+    volumes:
+      - ./node-red/data:/data
+
+  n8n-import:
+    image: n8nio/n8n:latest
+    entrypoint: ["/bin/sh", "-c"]
+    # Importa los flujos solo la primera vez (para no desactivarlos en cada reinicio).
+    command: ["[ -f /home/node/.n8n/.bibliotheca-imported ] && echo 'Flujos ya importados' || (n8n import:workflow --separate --input=/workflows && touch /home/node/.n8n/.bibliotheca-imported) || echo 'No se pudieron importar los flujos: importalos desde la interfaz'"]
+    volumes:
+      - n8n:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+    restart: "no"
+
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    depends_on:
+      n8n-import:
+        condition: service_completed_successfully
+    ports:
+      - "5678:5678"     # Editor: http://localhost:5678
+    environment:
+      TZ: ${TZ:-America/Mexico_City}
+      GENERIC_TIMEZONE: ${TZ:-America/Mexico_City}
+      N8N_SECURE_COOKIE: "false"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      N8N_RUNNERS_ENABLED: "true"
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      USERS_URL: http://users-service:3001
+      CATALOG_URL: http://catalog-service:3002
+      LOANS_URL: http://loans-service:3003
+      AI_URL: http://ai-service:3006
+    volumes:
+      - n8n:/home/node/.n8n
+
+  # ------------------------------------------------------------------
+  #  Microservicios (Node.js + TypeScript + NestJS, arquitectura hexagonal)
+  # ------------------------------------------------------------------
+  users-service:
+    <<: *node-service
+    build: ./services/users-service
+    depends_on:
+      <<: *node-deps
+      mysql-users: { condition: service_healthy }
+    ports: ["3001:3001"]
+    environment:
+      <<: *common-env
+      SERVICE_NAME: users-service
+      PORT: "3001"
+      DB_HOST: mysql-users
+      DB_NAME: users_db
+      DB_USER: bibliotheca
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME}
+
+  catalog-service:
+    <<: *node-service
+    build: ./services/catalog-service
+    depends_on:
+      <<: *node-deps
+      mysql-catalog: { condition: service_healthy }
+    ports: ["3002:3002"]
+    environment:
+      <<: *common-env
+      SERVICE_NAME: catalog-service
+      PORT: "3002"
+      DB_HOST: mysql-catalog
+      DB_NAME: catalog_db
+      DB_USER: bibliotheca
+
+  loans-service:
+    <<: *node-service
+    build: ./services/loans-service
+    depends_on:
+      <<: *node-deps
+      mysql-loans: { condition: service_healthy }
+    ports: ["3003:3003"]
+    environment:
+      <<: *common-env
+      SERVICE_NAME: loans-service
+      PORT: "3003"
+      DB_HOST: mysql-loans
+      DB_NAME: loans_db
+      DB_USER: bibliotheca
+      CATALOG_URL: http://catalog-service:3002
+      USERS_URL: http://users-service:3001
+      LOAN_DAYS_STUDENT: ${LOAN_DAYS_STUDENT:-7}
+      LOAN_DAYS_STAFF: ${LOAN_DAYS_STAFF:-14}
+      MAX_ACTIVE_LOANS_STUDENT: ${MAX_ACTIVE_LOANS_STUDENT:-3}
+      MAX_RENEWALS: ${MAX_RENEWALS:-2}
+      RENEWAL_DAYS: ${RENEWAL_DAYS:-7}
+      DAILY_FINE: ${DAILY_FINE:-5}
+      MAX_FINE_PER_LOAN: ${MAX_FINE_PER_LOAN:-150}
+
+  rfid-service:
+    <<: *node-service
+    build: ./services/rfid-service
+    depends_on:
+      <<: *node-deps
+      mysql-rfid: { condition: service_healthy }
+    ports: ["3004:3004"]
+    environment:
+      <<: *common-env
+      SERVICE_NAME: rfid-service
+      PORT: "3004"
+      DB_HOST: mysql-rfid
+      DB_NAME: rfid_db
+      DB_USER: bibliotheca
+      RFID_DEDUP_WINDOW_MS: ${RFID_DEDUP_WINDOW_MS:-5000}
+
+  notifications-service:
+    <<: *node-service
+    build: ./services/notifications-service
+    depends_on:
+      <<: *node-deps
+      mysql-notifications: { condition: service_healthy }
+    ports: ["3005:3005"]
+    environment:
+      <<: *common-env
+      SERVICE_NAME: notifications-service
+      PORT: "3005"
+      DB_HOST: mysql-notifications
+      DB_NAME: notifications_db
+      DB_USER: bibliotheca
+      USERS_URL: http://users-service:3001
+      N8N_NOTIFY_WEBHOOK_URL: http://n8n:5678/webhook/bibliotheca-notify
+      LIBRARY_ALERTS_CHAT_ID: ${LIBRARY_ALERTS_CHAT_ID}
+
+  ai-service:
+    <<: *node-service
+    build: ./services/ai-service
+    depends_on:
+      <<: *node-deps
+      qdrant: { condition: service_started }
+      ollama: { condition: service_healthy }
+    ports: ["3006:3006"]
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-America/Mexico_City}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      SERVICE_NAME: ai-service
+      PORT: "3006"
+      CATALOG_URL: http://catalog-service:3002
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: bibliotheca_books
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL}
+
+  api-gateway:
+    restart: unless-stopped
+    build: ./services/api-gateway
+    depends_on:
+      - users-service
+      - catalog-service
+      - loans-service
+      - rfid-service
+      - notifications-service
+      - ai-service
+    ports: ["3000:3000"]
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-America/Mexico_City}
+      PORT: "3000"
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      USERS_URL: http://users-service:3001
+      CATALOG_URL: http://catalog-service:3002
+      LOANS_URL: http://loans-service:3003
+      RFID_URL: http://rfid-service:3004
+      NOTIFICATIONS_URL: http://notifications-service:3005
+      AI_URL: http://ai-service:3006
+
+volumes:
+  mysql-users:
+  mysql-catalog:
+  mysql-loans:
+  mysql-rfid:
+  mysql-notifications:
+  rabbitmq:
+  qdrant:
+  ollama:
+  n8n:
